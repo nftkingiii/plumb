@@ -1,0 +1,210 @@
+version: "1"
+kind: miner
+id: 7310060
+slug: plumb
+protocol: generic
+name: Plumb On-Chain and CVE Truth
+description: >
+  Exact answers read straight from public sources, refused when they cannot be confirmed. Gas price in gwei,
+  wallet and ERC-20 balances (ENS names too), token total supply and transaction status are each read from at
+  least two independent public RPC nodes at the same block, and the answer is refused if the nodes disagree, if
+  fewer than two answer, or if the chain data is older than three minutes. CVE scores are the NVD primary CVSS
+  base score cross-checked against the CVE.org record. Covers Ethereum, Base, Arbitrum, Optimism, Polygon, BNB
+  Chain, Avalanche, Gnosis, Linea, Scroll, zkSync Era, Celo, Mantle, Sepolia and Base Sepolia, plus Solana token
+  supply. Unknown chains and tokens return an error, never a guess. No API keys.
+base_url: https://plumb.up.railway.app
+
+rate_limit_per_sec: 2
+cache_ttl_sec: 0
+circuit_threshold: 5
+circuit_cooldown_seconds: 30
+
+docs:
+  website: https://plumb.up.railway.app/health
+
+limitations:
+  - code: MAX_PARAM_LENGTH
+    message: every parameter must be at most 256 characters
+    param: token
+    property: length
+    value_num: 256
+    operator: lte
+  - code: CHAINS_SUPPORTED
+    message: ethereum, base, arbitrum, optimism, polygon, bsc, avalanche, gnosis, linea, scroll, zksync, celo, mantle, sepolia, base-sepolia. Other chains return 400 unknown_chain.
+  - code: TOKEN_SYMBOLS
+    message: Token symbols resolve only for a checked list of major tokens per chain; any other token must be given as a contract address.
+
+endpoints:
+  - path: /gas
+    external_path: /gas
+    method: GET
+    description: >
+      GAS_PRICE_GENERAL. Answers "what is the gas price on Ethereum right now" with the current gas price in gwei
+      (eth_gasPrice agreed by at least two public RPC nodes whose latest block is under three minutes old), the
+      estimated USD cost of a 21,000-gas transfer when two spot-price sources agree, and the time of the reading.
+    intents: [GAS_PRICE_GENERAL]
+    params:
+      query:
+        required:
+          - name: chain
+            type: string
+            intents: ["*"]
+            description: "Blockchain network: ethereum, base, arbitrum, optimism, polygon, bsc, avalanche, gnosis, linea, scroll, zksync, celo, mantle, sepolia or base-sepolia. Common names such as 'Arbitrum One' or 'BNB Chain' are understood."
+
+  - path: /balance
+    external_path: /balance
+    method: GET
+    description: >
+      WALLET_BALANCE_CHECK_GENERAL. Answers "how much ETH does vitalik.eth hold on Base" or "USDC balance of 0x... on
+      Ethereum" in whole token units (not wei), read at one pinned block from at least two public RPC nodes. Native coin
+      when token is empty.
+    intents: [WALLET_BALANCE_CHECK_GENERAL]
+    params:
+      query:
+        required:
+          - name: address
+            type: string
+            intents: ["*"]
+            description: "0x wallet address (mixed-case addresses must carry a valid EIP-55 checksum) or a lower-case .eth ENS name."
+          - name: chain
+            type: string
+            intents: ["*"]
+            description: "Blockchain network, for example ethereum, base, arbitrum, optimism, polygon, bsc, avalanche."
+        optional:
+          - name: token
+            type: string
+            intents: ["*"]
+            description: "Token symbol (for example USDC) or contract address. Leave empty for the chain's native coin."
+
+  - path: /supply
+    external_path: /supply
+    method: GET
+    description: >
+      TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL. Answers "what is the total supply of USDC on Base" with totalSupply() in whole
+      tokens (decimals applied), read at one pinned block from at least two public RPC nodes. Solana SPL mints are
+      read from two Solana RPC nodes.
+    intents: [TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL]
+    params:
+      query:
+        required:
+          - name: token
+            type: string
+            intents: ["*"]
+            description: "Token symbol or contract address, and its chain, for example 'USDC on Base', 'DAI', '0x514910771AF9Ca656af840dff83E8264EcF986CA ethereum' or 'USDC on Solana'. Ethereum is used, and flagged, when no chain is named."
+
+  - path: /tx
+    external_path: /tx
+    method: GET
+    description: >
+      ONCHAIN_TX_LOOKUP_GENERAL. Answers "what is the status of transaction 0x... on Base" with status confirmed,
+      reverted, pending or not_found taken from the receipt on at least two public RPC nodes, plus sender, recipient,
+      block number and native value in whole units. If the nodes disagree the request is refused, never answered not_found.
+    intents: [ONCHAIN_TX_LOOKUP_GENERAL]
+    params:
+      query:
+        required:
+          - name: tx_hash
+            type: string
+            intents: ["*"]
+            description: "Transaction hash: 0x followed by 64 hex characters."
+          - name: chain
+            type: string
+            intents: ["*"]
+            description: "Chain of the transaction, for example ethereum, base, arbitrum, optimism, polygon, bsc."
+
+  - path: /cve
+    external_path: /cve
+    method: GET
+    description: >
+      CVE_LOOKUP_CVSS. Answers "what is the CVSS score of CVE-2021-44228" with the NVD primary CVSS base score (3.1
+      preferred, then 3.0, 4.0, 2.0), the severity band computed from it, the English description, the publication date
+      and reference URLs, cross-checked against the CVE.org record. A CVE with no published score returns an error.
+    intents: [CVE_LOOKUP_CVSS]
+    params:
+      query:
+        required:
+          - name: cve_id
+            type: string
+            intents: ["*"]
+            description: "CVE identifier, for example CVE-2024-3094."
+
+input_schema:
+  type: object
+  properties:
+    chain:
+      type: string
+      description: Blockchain network name.
+    address:
+      type: string
+      description: Wallet address or .eth name.
+    token:
+      type: string
+      description: Token symbol or contract address (and chain, for total supply).
+    tx_hash:
+      type: string
+      pattern: "^0x[0-9a-fA-F]{64}$"
+    cve_id:
+      type: string
+      pattern: "^CVE-[0-9]{4}-[0-9]{4,19}$"
+
+semantics:
+  signal_mapping:
+    label_field: status
+  supported_intents:
+    - GAS_PRICE_GENERAL
+    - WALLET_BALANCE_CHECK_GENERAL
+    - TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL
+    - ONCHAIN_TX_LOOKUP_GENERAL
+    - CVE_LOOKUP_CVSS
+
+intent_mapping:
+  GAS_PRICE_GENERAL:
+    endpoint: /gas
+    input:
+      chain: { from: chain }
+    output:
+      chain: { path: chain }
+      gas_price_gwei: { path: gas_price_gwei, unit: gwei }
+      transfer_fee_usd: { path: transfer_fee_usd }
+      as_of: { path: as_of }
+  WALLET_BALANCE_CHECK_GENERAL:
+    endpoint: /balance
+    input:
+      address: { from: address }
+      chain: { from: chain }
+      token: { from: token, how: "Token symbol or contract address; empty string for the chain's native coin." }
+    output:
+      address: { path: address }
+      chain: { path: chain }
+      balance: { path: balance }
+      token_symbol: { path: token_symbol }
+      as_of: { path: as_of }
+  TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL:
+    endpoint: /supply
+    input:
+      token: { from: token, how: "Token and its chain exactly as asked, for example 'USDC on Base'." }
+    output:
+      total_supply: { path: total_supply }
+  ONCHAIN_TX_LOOKUP_GENERAL:
+    endpoint: /tx
+    input:
+      tx_hash: { from: tx_hash }
+      chain: { from: chain }
+    output:
+      tx_hash: { path: tx_hash }
+      status: { path: status }
+      from: { path: from }
+      to: { path: to }
+      block_number: { path: block_number }
+      value_eth: { path: value_eth }
+  CVE_LOOKUP_CVSS:
+    endpoint: /cve
+    input:
+      cve_id: { from: cve_id }
+    output:
+      cve_id: { path: cve_id }
+      cvss_score: { path: cvss_score }
+      severity: { path: severity }
+      description: { path: description }
+      published: { path: published }
+      references: { path: references }
